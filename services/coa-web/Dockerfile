@@ -22,7 +22,10 @@ RUN npm run build:web
 
 FROM rust:1-bookworm AS build
 WORKDIR /src
+# coa-core takes its version and edition from the Manager's workspace manifest, which also names its members.
+COPY Cargo.toml ./
 COPY crates crates
+COPY src-tauri src-tauri
 COPY services/coa-web services/coa-web
 WORKDIR /src/services/coa-web
 RUN cargo build --release --bin coa-web
