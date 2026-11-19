@@ -57,3 +57,28 @@ jobs:
             services/coa-web/Cargo.lock
             dist-web
           retention-days: 7
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the image
+        run: docker build -f services/coa-web/Dockerfile -t coa-web:ci .
+      - name: The Docker client in the image reaches the host's Docker
+        run: |
+          gid=$(stat -c %g /var/run/docker.sock)
+          docker run --rm --group-add "$gid" -v /var/run/docker.sock:/var/run/docker.sock --entrypoint docker coa-web:ci version
+          docker run --rm --entrypoint docker coa-web:ci buildx version
+      - name: The container serves the interface and the API
+        run: |
+          mkdir -p "$RUNNER_TEMP/srv"
+          docker run -d --name coa-web --network host --user "$(id -u):$(id -g)" \
+            -e COA_WEB_TOKEN=ci-token-0123456789abcdef0123 -e COA_MANAGER_DATA_DIR="$RUNNER_TEMP/srv/.manager" \
+            -v "$RUNNER_TEMP/srv:$RUNNER_TEMP/srv" coa-web:ci
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8787/api/health && break; sleep 1; done
+          curl -fs http://127.0.0.1:8787/ | grep -q '<div id="root">'
+          curl -fs -X POST -H 'x-coa-request: 1' -H 'Authorization: Bearer ci-token-0123456789abcdef0123' \
+            -H 'content-type: application/json' -d '{}' http://127.0.0.1:8787/api/invoke/list_servers | grep -q '^\[\]$'
+          test -d "$RUNNER_TEMP/srv/.manager"
+      - if: failure()
+        run: docker logs coa-web || true

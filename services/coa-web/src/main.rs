@@ -49,6 +49,9 @@ async fn main() {
     }
 
     let data_dir = state::default_data_dir();
+    if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        fail(&format!("cannot create the data folder {}: {e}", data_dir.display()));
+    }
     tracing::info!(data = %data_dir.display(), %bind, "coa-web starting");
     let app = router(AppState::new(data_dir), auth, static_dir);
 

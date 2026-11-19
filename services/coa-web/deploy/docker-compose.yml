@@ -1,0 +1,35 @@
+# coa-web on a Linux host. Put the values in a `.env` file next to this one:
+#
+#   COA_WEB_TOKEN=<openssl rand -hex 32>
+#   COA_UID=1000                    # owner of /srv/coa on the host (id -u)
+#   COA_GID=1000                    # (id -g)
+#   DOCKER_GID=<getent group docker | cut -d: -f3>
+#   COA_WEB_BIND=127.0.0.1:8787     # or the LAN address your reverse proxy reaches
+#   COA_PACKAGE_SOURCE=             # optional: folder under /srv/coa or https address of a Linux package
+#   COA_TRUSTED_KEY=                # optional: public key of your own package signature
+#
+#   docker compose up -d --build
+#
+# Servers and game data go under /srv/coa (for example /srv/coa/CoaServer and /srv/coa/gamedata): that folder is
+# mounted at the same path inside, because the paths are handed to the host's Docker.
+services:
+  coa-web:
+    image: coa-web:local
+    build:
+      context: ../../..
+      dockerfile: services/coa-web/Dockerfile
+    network_mode: host
+    user: "${COA_UID:-1000}:${COA_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:?set DOCKER_GID (getent group docker | cut -d: -f3)}"
+    environment:
+      COA_WEB_TOKEN: "${COA_WEB_TOKEN:?set COA_WEB_TOKEN (openssl rand -hex 32)}"
+      COA_WEB_BIND: "${COA_WEB_BIND:-127.0.0.1:8787}"
+      COA_MANAGER_DATA_DIR: /srv/coa/.manager
+      HOME: /srv/coa
+      COA_PACKAGE_SOURCE: "${COA_PACKAGE_SOURCE:-}"
+      COA_TRUSTED_KEY: "${COA_TRUSTED_KEY:-}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/coa:/srv/coa
+    restart: unless-stopped

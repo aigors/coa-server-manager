@@ -53,6 +53,26 @@ The user running it needs access to Docker (member of the `docker` group). Put a
 | `COA_PACKAGE_SOURCE` | Default Linux package (folder or http(s) address) |
 | `COA_TRUSTED_KEY` | Public key the package must be signed with, default the official key |
 
+## Run in Docker
+
+```bash
+cd services/coa-web/deploy
+cp /dev/null .env   # then fill in the values listed at the top of docker-compose.yml
+docker compose up -d --build
+```
+
+The image holds the interface, the service and the Docker client only; the servers still run as containers of the
+host's Docker. Because of that the container needs:
+
+* **the host's Docker socket** (`/var/run/docker.sock`) and the `docker` group (`group_add`);
+* **the host network** (`network_mode: host`): the service checks the servers' ports and uses the RA console on
+  `127.0.0.1`;
+* **the same paths inside and outside**: `/srv/coa` is mounted at `/srv/coa`, and servers and game data go under it,
+  because those paths are handed to the host's Docker as bind mounts. The Manager's data is kept in `/srv/coa/.manager`.
+
+Access to the Docker socket is equivalent to root on the host: anyone who logs in to the web interface can, in
+effect, control the machine. Keep the token secret and the service behind HTTPS.
+
 ## Security
 
 * Login exchanges the token for an `HttpOnly`, `SameSite=Strict` cookie (derived from the token, not the token
