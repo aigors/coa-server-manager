@@ -1,0 +1,59 @@
+name: web-check
+# Prototype web backend (services/coa-web) and the web build of the interface. Linux only: the web service manages
+# Docker servers.
+on:
+  push:
+    branches: [web-backend]
+    paths: ['services/coa-web/**', 'crates/coa-core/**', 'src/**', 'package.json', '.github/workflows/web-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/coa-web/target
+          key: coa-web-${{ runner.os }}-${{ hashFiles('services/coa-web/Cargo.toml', 'crates/coa-core/Cargo.toml') }}
+          restore-keys: coa-web-${{ runner.os }}-
+      - name: Test the backend
+        run: cargo test --manifest-path services/coa-web/Cargo.toml
+      - name: Build the backend
+        run: cargo build --release --manifest-path services/coa-web/Cargo.toml
+      - run: npm ci
+      - name: Build the web interface
+        run: npm run build:web
+      - name: The web build carries the bridge, the desktop build does not
+        run: |
+          grep -rq "/api/invoke/" dist-web/assets/
+          npm run build
+          ! grep -rq "/api/invoke/" dist/assets/
+      - name: Smoke test the running service
+        run: |
+          export COA_WEB_TOKEN=ci-token-0123456789abcdef0123 COA_WEB_STATIC=$PWD/dist-web COA_WEB_INSECURE_COOKIE=1
+          export COA_MANAGER_DATA_DIR=$RUNNER_TEMP/coa-data
+          services/coa-web/target/release/coa-web & pid=$!
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8787/api/health && break; sleep 1; done
+          curl -fs http://127.0.0.1:8787/ | grep -q '<div id="root">'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'x-coa-request: 1' http://127.0.0.1:8787/api/invoke/list_servers)" = 401
+          curl -fs -X POST -H 'x-coa-request: 1' -H "Authorization: Bearer $COA_WEB_TOKEN" -H 'content-type: application/json' -d '{}' http://127.0.0.1:8787/api/invoke/install_environment | tee env.json
+          grep -q '"flavor"' env.json
+          kill $pid
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coa-web
+          path: |
+            services/coa-web/target/release/coa-web
+            services/coa-web/Cargo.lock
+            dist-web
+          retention-days: 7
