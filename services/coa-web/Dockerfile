@@ -26,6 +26,13 @@ WORKDIR /src
 COPY Cargo.toml ./
 COPY crates crates
 COPY src-tauri src-tauri
+# Files coa-core embeds at compile time (include_str!/include_bytes!).
+COPY keys keys
+COPY modules modules
+COPY addons addons
+COPY schemas schemas
+COPY changelog changelog
+COPY src/data src/data
 COPY services/coa-web services/coa-web
 WORKDIR /src/services/coa-web
 RUN cargo build --release --bin coa-web
