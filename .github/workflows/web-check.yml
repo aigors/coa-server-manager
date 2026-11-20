@@ -29,7 +29,7 @@ jobs:
       - name: Test the backend
         run: cargo test --manifest-path services/coa-web/Cargo.toml
       - name: Test the Docker server driver it uses
-        run: "cargo test --manifest-path services/coa-web/Cargo.toml -p coa-core --lib docker::"
+        run: "cargo test --locked -p coa-core --lib docker::"
       - name: Build the backend
         run: cargo build --release --manifest-path services/coa-web/Cargo.toml
       - run: npm ci
