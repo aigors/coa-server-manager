@@ -526,9 +526,11 @@ fn db_args(cfg: &Config, n: &Names, owner: Option<&str>) -> Vec<String> {
     ]);
     a.extend(["--stop-timeout".into(), "60".into()]);
     a.push(cfg.mysql_image.clone());
-    if cfg.mysql_data.is_some() {
-        a.push("--lower-case-table-names=1".into());
-    }
+    // Table names are folded to lower case on every database, as on Windows where the server was written: some of its
+    // queries name a table in another case than the one it was created with (manastorm_Endgame_scaling_curve), which a
+    // case-sensitive Linux server rejects and the world server then aborts at startup. A server option, so after the
+    // image name; it takes effect when the database is created and must stay the same afterwards.
+    a.push("--lower-case-table-names=1".into());
     a
 }
 
@@ -1189,7 +1191,8 @@ mod tests {
             Some("--lower-case-table-names=1"),
             "a server option, so after the image name"
         );
-        // An installation never gets any of it.
+        // An installation keeps its database on a named volume, written by the image's own user, and folds table names
+        // to lower case too: the world server's queries rely on it.
         let (_d2, root2) = server("t2");
         let sim2 = Sim::new();
         assert!(run_with(&sim2, &root2, Verb::StartMysql).unwrap().ok);
@@ -1200,9 +1203,12 @@ mod tests {
                 .any(|w| w == ["--volume", "coa-t2-db:/var/lib/mysql"]),
             "{plain:?}"
         );
-        assert!(!plain
-            .iter()
-            .any(|a| a == "--lower-case-table-names=1" || a == "--user"));
+        assert!(!plain.iter().any(|a| a == "--user"), "{plain:?}");
+        assert_eq!(
+            plain.last().map(String::as_str),
+            Some("--lower-case-table-names=1"),
+            "{plain:?}"
+        );
     }
 
     #[test]
