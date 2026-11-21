@@ -10,6 +10,10 @@ publish = false
 
 [dependencies]
 coa-core = { path = "../../crates/coa-core" }
+# What the desktop commands use besides coa-core (src-tauri/Cargo.toml), compiled into this service by build.rs.
+coa-registry-proto = { path = "../../crates/coa-registry-proto" }
+coa-control-proto = { path = "../../crates/coa-control-proto" }
+uuid = { version = "1", features = ["v4"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -20,6 +24,12 @@ sha2 = "0.10"
 hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[build-dependencies]
+syn = { version = "2", features = ["full", "visit", "visit-mut", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+prettyplease = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

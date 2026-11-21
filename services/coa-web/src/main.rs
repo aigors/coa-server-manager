@@ -53,7 +53,8 @@ async fn main() {
         fail(&format!("cannot create the data folder {}: {e}", data_dir.display()));
     }
     tracing::info!(data = %data_dir.display(), %bind, "coa-web starting");
-    let app = router(AppState::new(data_dir), auth, static_dir);
+    let state = AppState::new(data_dir);
+    let app = router(state.clone(), auth, static_dir);
 
     let listener = tokio::net::TcpListener::bind(bind)
         .await
@@ -64,6 +65,8 @@ async fn main() {
         })
         .await
         .unwrap_or_else(|e| fail(&e.to_string()));
+    // As the desktop app does on exit: the background services finish what they are doing.
+    tokio::task::spawn_blocking(move || state.shutdown()).await.ok();
 }
 
 fn fail(message: &str) -> ! {

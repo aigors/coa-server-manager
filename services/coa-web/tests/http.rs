@@ -9,8 +9,16 @@ use tower::ServiceExt;
 
 const TOKEN: &str = "test-token-0123456789abcdef0123";
 
-fn app(dir: &tempfile::TempDir) -> axum::Router {
-    router(AppState::new(dir.path().to_path_buf()), Auth::token(TOKEN, false), None)
+/// The Manager's data folder is one per process (as in the desktop app), so the tests share one state, in a folder
+/// with no servers.
+fn app(_dir: &tempfile::TempDir) -> axum::Router {
+    static SHARED: std::sync::OnceLock<(tempfile::TempDir, std::sync::Arc<AppState>)> = std::sync::OnceLock::new();
+    let (_, state) = SHARED.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().to_path_buf());
+        (dir, state)
+    });
+    router(state.clone(), Auth::token(TOKEN, false), None)
 }
 
 fn invoke(cmd: &str) -> axum::http::request::Builder {
@@ -98,16 +106,38 @@ async fn an_unknown_server_id_answers_with_the_ui_error_shape() {
 }
 
 #[tokio::test]
-async fn a_command_the_web_version_lacks_says_so() {
+async fn a_command_the_manager_does_not_have_says_so() {
     let dir = tempfile::tempdir().unwrap();
-    let req = invoke("play")
+    let req = invoke("no_such_command")
         .header("x-coa-request", "1")
         .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
         .body(Body::from("{}"))
         .unwrap();
     let (status, body, _) = send(app(&dir), req).await;
     assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
-    assert!(body["technical"].as_str().unwrap().contains("play"), "{body}");
+    assert!(body["technical"].as_str().unwrap().contains("no_such_command"), "{body}");
+}
+
+#[tokio::test]
+async fn a_desktop_command_reads_its_arguments_by_their_camel_case_names() {
+    let dir = tempfile::tempdir().unwrap();
+    // list_presets(scope: Scope): a missing argument is the command's own argument error, not "not available".
+    let req = invoke("list_presets")
+        .header("x-coa-request", "1")
+        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .body(Body::from("{}"))
+        .unwrap();
+    let (status, body, _) = send(app(&dir), req).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(body.as_str().unwrap().contains("scope"), "{body}");
+    let req = invoke("module_catalog")
+        .header("x-coa-request", "1")
+        .header(header::AUTHORIZATION, format!("Bearer {TOKEN}"))
+        .body(Body::from("{}"))
+        .unwrap();
+    let (status, body, _) = send(app(&dir), req).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.as_array().is_some_and(|a| !a.is_empty()), "{body}");
 }
 
 #[tokio::test]
@@ -144,5 +174,10 @@ async fn info_lists_the_supported_commands() {
         .unwrap();
     let (status, body, _) = send(app(&dir), req).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body["commands"].as_array().unwrap().iter().any(|c| c == "start_server"));
+    let commands = body["commands"].as_array().unwrap();
+    // Every command the desktop app registers, its control-plane module's included.
+    for c in ["start_server", "create_backup", "module_settings", "apply_update", "play", "join_realm"] {
+        assert!(commands.iter().any(|x| x == c), "{c} missing from {commands:?}");
+    }
+    assert!(commands.len() > 150, "{}", commands.len());
 }

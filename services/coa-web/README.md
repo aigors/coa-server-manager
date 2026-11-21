@@ -8,20 +8,26 @@ sends Tauri's `invoke(command, args)` to this service over HTTP and receives eve
 browser ── HTTPS (reverse proxy) ──> coa-web :8787 ──> coa-core ──> docker (mysql, authserver, worldserver)
 ```
 
-## What works in the prototype
+## Commands: the desktop Manager's own
 
-| Area | Commands |
-|---|---|
-| Servers | `list_servers`, `scan_server`, `add_server`, `forget_server`, `game_data_folder` |
-| Start / stop / status | `server_status`, `start_server`, `stop_server`, `force_stop_server` |
-| Logs | `console_tail` (world, auth, database) |
-| Accounts | `list_accounts`, `create_account`, `account_set_password`, `account_set_access` |
-| Players online | `get_population` |
-| Install (Docker) | `install_environment`, `default_install_dir`, `install_preflight`, `install_requirements`, `install_new` (progress as `install-progress` events), `cancel_install` |
+The service runs **every command the desktop app registers**, with the desktop's own code. `build.rs` reads
+`src-tauri/src`, leaves out what only builds the window (`run()`: window, tray, plugins), points the few `tauri::` paths
+the commands use at `src/shim.rs`, and generates the HTTP side of each command from its signature: each argument is read
+from the JSON body under the name the interface sends (camelCase, as Tauri does), the result is returned as JSON, an
+error as the value the command rejects with. A command added or changed upstream is served as soon as the service
+builds again; `GET /api/info` lists them.
 
-Every other command answers HTTP 501 with the usual error shape ("not available in the web version yet"), which the
-interface shows like any other error. `start_server` leaves out the desktop app's companions reconciliation.
-File pickers become a prompt for a path **on the server**.
+What differs from the desktop app:
+
+* Everything runs **on the machine of this service**: backups, logs, game data, client folders, diagnostics. Commands
+  about the game client on a player's computer (`play`, `client_*`, `portable_*`) act on this machine too; starting the
+  game fails here, as there is no screen.
+* Events (`install-progress`, backup progress...) reach every connected browser over Server-Sent Events.
+* A link a command opens (the dashboard, a help page) opens in a new tab of the browser; showing a folder does nothing.
+* Exiting the Manager or closing it to the tray reloads the page; the service keeps running.
+* The Linux package's signing key may be set with `COA_TRUSTED_KEY` (`src/overrides.rs`); the desktop allows that only
+  in debug builds.
+* File pickers become a prompt for a path **on the server**.
 
 ## Build
 

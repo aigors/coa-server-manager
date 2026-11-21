@@ -4,7 +4,7 @@ name: web-check
 on:
   push:
     branches: [web-backend]
-    paths: ['services/coa-web/**', 'crates/coa-core/**', 'src/**', 'package.json', '.github/workflows/web-check.yml']
+    paths: ['services/coa-web/**', 'crates/**', 'src-tauri/src/**', 'src/**', 'package.json', '.github/workflows/web-check.yml']
   workflow_dispatch:
 permissions:
   contents: read

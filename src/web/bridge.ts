@@ -17,6 +17,11 @@ function connectEvents() {
   events.onmessage = (m) => {
     let message: { event: string; payload: unknown };
     try { message = JSON.parse(m.data); } catch { return; }
+    // A desktop command opened a link (the Manager's dashboard, a help page): open it here, next to the Manager.
+    if (message.event === "coa-web://open-url" && typeof message.payload === "string") {
+      window.open(message.payload, "_blank", "noopener");
+      return;
+    }
     for (const id of listeners.get(message.event) ?? []) {
       callbacks.get(id)?.({ event: message.event, id, payload: message.payload });
     }
@@ -53,6 +58,8 @@ async function call(command: string, args: unknown): Promise<unknown> {
     body: JSON.stringify(args ?? {}),
   });
   if (r.status === 401) { await login(); return call(command, args); }
+  // Logged in: keep the event stream open, also for links that commands open.
+  connectEvents();
   const text = await r.text();
   let body: unknown = null;
   if (text) { try { body = JSON.parse(text); } catch { body = text; } }

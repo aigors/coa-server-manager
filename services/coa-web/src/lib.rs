@@ -9,10 +9,15 @@
 //! * `GET /api/events`: Server-Sent Events, one `{event, payload}` message per event (for example `install-progress`).
 //! * `POST /api/login` / `POST /api/logout`: an access token exchanged for an `HttpOnly`, `SameSite=Strict` cookie.
 //!
-//! As in the desktop app, every mutating command takes an installation id and resolves the path from the registry.
+//! The commands are the desktop Manager's own (`src-tauri/src`, compiled into this service by build.rs), so the web
+//! version offers every command the desktop app has and behaves the same way; they run on the machine of this service.
 
 pub mod commands;
+mod desktop;
+mod overrides;
+pub mod shim;
 pub mod state;
+mod web_args;
 
 use std::convert::Infallible;
 use std::path::PathBuf;
@@ -180,7 +185,7 @@ async fn info() -> Json<Value> {
         "name": "CoA Server Manager (web)",
         "version": env!("CARGO_PKG_VERSION"),
         "flavor": coa_core::platform::flavor(),
-        "commands": commands::SUPPORTED,
+        "commands": commands::supported(),
     }))
 }
 
@@ -200,12 +205,12 @@ async fn invoke(
             .into();
             (StatusCode::NOT_IMPLEMENTED, Json(e)).into_response()
         }
-        Err(commands::CallError::Ui(e)) => (StatusCode::UNPROCESSABLE_ENTITY, Json(e)).into_response(),
+        Err(commands::CallError::Failed(e)) => (StatusCode::UNPROCESSABLE_ENTITY, Json(e)).into_response(),
     }
 }
 
-async fn events(State(web): State<Arc<Web>>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream = BroadcastStream::new(web.app.events.subscribe()).filter_map(|m| {
+async fn events() -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream = BroadcastStream::new(shim::events().subscribe()).filter_map(|m| {
         // A client too slow to keep up misses events (`Lagged`); the screens poll the state they show anyway.
         let m = m.ok()?;
         Some(Ok(Event::default().data(serde_json::to_string(&m).ok()?)))

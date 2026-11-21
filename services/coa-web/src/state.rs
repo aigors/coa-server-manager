@@ -1,99 +1,39 @@
-//! What the service keeps between calls: where the Manager's own data lives, which servers are busy, the running
-//! install, and the channel that carries events to the browsers.
+//! What the service keeps between calls: the desktop Manager's own state (server list, busy servers, the running
+//! install, the background services) and the handle its commands use to send events to the browsers.
 
-use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use coa_core::download::Cancel;
-use coa_core::registry::Registry;
-use coa_core::{Error, Result};
-use serde::Serialize;
-use serde_json::Value;
-use tokio::sync::broadcast;
+use crate::desktop;
+use crate::shim::tauri::AppHandle;
 
-/// One event for the interface, as Tauri's `emit(event, payload)` would send it.
-#[derive(Clone, Debug, Serialize)]
-pub struct WebEvent {
-    pub event: String,
-    pub payload: Value,
-}
+pub use crate::shim::WebEvent;
 
 pub struct AppState {
     /// The Manager's data folder (`installs.json`, logs); the same layout the desktop Manager uses on Linux.
     pub data_dir: PathBuf,
-    /// Installation ids with an action currently running (one action at a time per server).
-    pub busy: Mutex<HashSet<String>>,
-    /// Cancel handle of the installation currently running, if any.
-    pub install_cancel: Mutex<Option<Cancel>>,
-    pub events: broadcast::Sender<WebEvent>,
+    pub(crate) desktop: Arc<desktop::AppState>,
+    pub(crate) handle: AppHandle,
 }
 
 impl AppState {
+    /// The desktop commands find their data folder in `COA_MANAGER_DATA_DIR`, as the desktop app does: it is set here
+    /// so that both agree. One service has one data folder.
     pub fn new(data_dir: PathBuf) -> Arc<Self> {
-        let (events, _) = broadcast::channel(256);
-        Arc::new(Self {
-            data_dir,
-            busy: Mutex::new(HashSet::new()),
-            install_cancel: Mutex::new(None),
-            events,
-        })
+        std::env::set_var("COA_MANAGER_DATA_DIR", &data_dir);
+        // The desktop app builds its state on the main thread, outside any async runtime: its background services make
+        // blocking HTTP clients, which tokio does not allow to be made or dropped on one of its own threads.
+        let desktop = std::thread::spawn(desktop::make_state)
+            .join()
+            .expect("the Manager's state could not be built");
+        let desktop = Arc::new(desktop);
+        let handle = AppHandle::new(desktop.clone());
+        Arc::new(Self { data_dir, desktop, handle })
     }
 
-    pub fn registry(&self) -> Registry {
-        Registry::at(self.data_dir.join("installs.json"))
-    }
-
-    pub fn emit(&self, event: &str, payload: impl Serialize) {
-        if let Ok(payload) = serde_json::to_value(payload) {
-            // No browser listening is not an error.
-            let _ = self.events.send(WebEvent {
-                event: event.into(),
-                payload,
-            });
-        }
-    }
-
-    /// The folder of a registered installation. The browser can only name ids, never paths.
-    pub fn path_of(&self, id: &str) -> Result<PathBuf> {
-        self.registry()
-            .list()?
-            .into_iter()
-            .find(|(i, _)| i == id)
-            .map(|(_, p)| p)
-            .ok_or_else(|| Error::UnknownInstallation(id.to_string()))
-    }
-}
-
-/// Holds the "busy" mark of one server until dropped.
-pub struct BusyGuard {
-    state: Arc<AppState>,
-    id: String,
-}
-
-impl BusyGuard {
-    pub fn acquire(state: &Arc<AppState>, id: &str) -> Result<Self> {
-        let mut b = state
-            .busy
-            .lock()
-            .map_err(|_| Error::Invalid("state poisoned".into()))?;
-        if !b.insert(id.to_string()) {
-            return Err(Error::Invalid(
-                "Another action is still in progress for this server.".into(),
-            ));
-        }
-        Ok(Self {
-            state: state.clone(),
-            id: id.to_string(),
-        })
-    }
-}
-
-impl Drop for BusyGuard {
-    fn drop(&mut self) {
-        if let Ok(mut b) = self.state.busy.lock() {
-            b.remove(&self.id);
-        }
+    /// Stop the background services (portable play, public listing, control links), as the desktop app does on exit.
+    pub fn shutdown(&self) {
+        desktop::shutdown(&self.desktop);
     }
 }
 
